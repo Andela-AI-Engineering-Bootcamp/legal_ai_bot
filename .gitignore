@@ -5,6 +5,9 @@ build/
 dist/
 wheels/
 *.egg-info
+.idea/
+.idea/*
+.idea/legal_ai_bot.iml
 
 # Virtual environments
 .venv
