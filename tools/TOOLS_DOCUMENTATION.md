@@ -2,15 +2,30 @@
 
 > **Author:** Larry (Tool Use Section)
 > **Module:** `tools/`
+> **Data Source:** Real Nigerian legal acts from `rag/knowledge-base/`
 > **Dependencies:** None (pure Python — no external packages required)
 
 ---
 
 ## Overview
 
-This module implements **5 legal tools** that the AI agent can call during a conversation with a citizen. Instead of the LLM guessing or hallucinating legal information, it calls these tools to retrieve real statutes, analyze documents, find precedents, and generate actionable outputs.
+This module implements **5 legal tools** that the AI agent can call during a conversation with a citizen. Instead of the LLM guessing or hallucinating legal information, it calls these tools to search **real Nigerian statutes** from the knowledge base, analyze documents, find relevant provisions, and generate actionable outputs.
 
 This is the **Tool Use** concept from the presentation — the agent decides *when* to call a tool, *which* tool to call, and *chains* multiple tools together to solve the user's problem.
+
+### Knowledge Base (Source Data)
+
+All tools read from the actual legal documents in `rag/knowledge-base/`:
+
+| File | Act | Content |
+|------|-----|---------|
+| `Labour Act.md` | Labour Act, 1974 (No. 21) | Wage protection, contracts, termination, hours, leave, recruiting |
+| `Tenancy Law.md` | Lagos Tenancy Law, 2011 | Tenant rights, notice periods, eviction, court procedures, mediation |
+| `Federal Consumer Act.md` | Federal Competition and Consumer Protection Act, 2018 | Consumer rights, refunds, defective goods, FCCPC enforcement |
+| `Consumer Act.md` | Consumer Act | Consumer protection provisions |
+| `Food And Drugs Act.md` | Food and Drugs Act | Food/drug manufacturing and sale regulations |
+| `Nigeria Constitution 1999.md` | Constitution of the Federal Republic of Nigeria, 1999 | Fundamental rights, citizenship, governance |
+| `Tenancy Disputes.md` | Tenancy Disputes (Research) | Academic paper on property dispute resolution |
 
 ### How Tool Use Works (Conceptually)
 
@@ -26,14 +41,14 @@ Agent decides which tool(s) to call
         ├──► detect_jurisdiction("My oga no gree pay me in Lagos")
         │         └──► Returns: Nigeria (HIGH confidence)
         │
-        ├──► search_legal_database("Nigeria", "labor", "salary deduction")
-        │         └──► Returns: Nigerian Labor Act Section 12
+        ├──► search_legal_database(topic="labor", keyword="deduction")
+        │         └──► Searches Labour Act.md → Returns Section 5 text
         │
         ├──► find_similar_cases("salary deducted for being late")
-        │         └──► Returns: Musa v. Al-Bashir Enterprises (2021)
+        │         └──► Searches knowledge base → Returns Labour Act Sections 5, 11
         │
-        └──► generate_complaint("unpaid wages", "Nigeria", ...)
-                  └──► Returns: Complaint letter + filing instructions
+        └──► generate_complaint("unpaid wages", ...)
+                  └──► Returns: Complaint letter citing Labour Act Sections 80-85
         │
         ▼
 Agent combines all tool results into a clear, cited response
@@ -62,44 +77,50 @@ tools/
 
 **File:** `tools/legal_search.py`
 
-**Purpose:** Looks up actual statutes, acts, and legal provisions for African countries. This is the core reference tool — when a citizen asks "Is X legal?", the agent calls this tool to ground its answer in real law.
+**Purpose:** Searches the actual Nigerian legal acts in `rag/knowledge-base/` by topic and keyword. Returns real statute text with section numbers.
 
 **Function signature:**
 ```python
-def search_legal_database(country: str, topic: str, keyword: str = "") -> dict
+def search_legal_database(topic: str, keyword: str = "", section: str = "") -> dict
 ```
 
 **Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `country` | str | Yes | African country (e.g. "Nigeria", "Ghana", "Kenya") |
-| `topic` | str | Yes | Legal topic: labor, tenancy, consumer, contract, family, criminal |
-| `keyword` | str | No | Optional keyword to narrow results (e.g. "salary deduction") |
+| `topic` | str | Yes | Legal topic: labor, tenancy, consumer, constitution, food |
+| `keyword` | str | No | Keyword to search for (e.g. "deduction", "eviction") |
+| `section` | str | No | Specific section number to look up (e.g. "5", "13") |
+
+**Topic-to-file mapping:**
+| Topic | Knowledge Base File(s) |
+|-------|----------------------|
+| `labor` | `Labour Act.md` |
+| `tenancy` | `Tenancy Law.md`, `Tenancy Disputes.md` |
+| `consumer` | `Federal Consumer Act.md`, `Consumer Act.md` |
+| `constitution` | `Nigeria Constitution 1999.md` |
+| `food` | `Food And Drugs Act.md` |
 
 **Example call & result:**
 ```python
->>> search_legal_database("Nigeria", "labor", "deduction")
+>>> search_legal_database("labor", "deduction")
 {
     "found": True,
-    "country": "Nigeria",
     "topic": "labor",
+    "search_term": "deduction",
     "results": [
         {
-            "statute": "Nigerian Labor Act, 2004",
-            "section": "Section 12",
-            "title": "Permissible Deductions from Wages",
-            "text": "No employer shall make any deduction from the wages...",
-            "penalty": "Worker may claim full refund plus damages..."
+            "section": "5. Deductions (including deductions for overpayment of wages)",
+            "excerpt": "(1) Except where it is expressly permitted by this Act...",
+            "source_act": "Labour Act, 1974 (No. 21)",
+            "source_file": "Labour Act.md"
         }
     ],
-    "count": 1
+    "count": 1,
+    "note": "Excerpts from actual Nigerian legal acts in rag/knowledge-base/."
 }
 ```
 
-**Presentation scenario:** User asks "My boss deducted ₦10,000 from my salary for being 5 minutes late. Is this allowed?" → Agent calls this tool → Gets Section 12 of the Nigerian Labor Act → Tells user it is ILLEGAL and what to do.
-
-**Countries covered:** Nigeria, Ghana, Kenya
-**Topics covered:** labor, tenancy, consumer, contract
+**Presentation scenario:** User asks "My boss deducted ₦10,000 from my salary for being 5 minutes late" → Agent calls this tool → Searches `Labour Act.md` → Returns Section 5 which says deductions for fines are prohibited → Agent cites the real statute.
 
 ---
 
@@ -107,7 +128,7 @@ def search_legal_database(country: str, topic: str, keyword: str = "") -> dict
 
 **File:** `tools/contract_analyzer.py`
 
-**Purpose:** Analyzes contract text for risky, non-standard, or potentially unfair clauses. Flags issues by risk level (HIGH/MEDIUM/LOW) and suggests safer alternatives.
+**Purpose:** Analyzes contract text for risky, non-standard, or potentially unfair clauses. All flags reference real Nigerian law from the knowledge base.
 
 **Function signature:**
 ```python
@@ -120,47 +141,34 @@ def analyze_contract(contract_text: str, country: str = "Nigeria") -> dict
 | `contract_text` | str | Yes | Full text of the contract to analyze |
 | `country` | str | No | Country whose law applies (default: Nigeria) |
 
-**What it detects:**
-| Risky Pattern | Risk Level | Why It's Risky |
-|---------------|-----------|----------------|
-| "buyer liable for all" | HIGH | Shifts ALL liability to buyer — non-standard |
-| "no refund" | HIGH | Eliminates refund rights even for defective goods |
-| "waive all rights" | HIGH | Blanket waiver, typically unconscionable |
-| "non-compete" | MEDIUM | Can restrict future livelihood |
-| "automatic renewal" | MEDIUM | Traps party in unwanted obligations |
-| "penalty" | MEDIUM | May be unenforceable if disproportionate |
-| "sole discretion" | MEDIUM | Gives one party unchecked power |
+**What it detects (with real legal references):**
+| Risky Pattern | Risk Level | Legal Reference |
+|---------------|-----------|-----------------|
+| "buyer liable for all" | HIGH | FCCPA 2018, Section 136 — liability for defective goods |
+| "no refund" | HIGH | FCCPA 2018, Section 122 — consumer right to return goods |
+| "waive all rights" | HIGH | FCCPA 2018 — prohibits waiving consumer rights |
+| "deduction" | MEDIUM | Labour Act 1974, Section 5 — permitted deductions only |
+| "non-compete" | MEDIUM | Labour Act 1974, Section 9(6) — freedom to work |
+| "automatic renewal" | MEDIUM | Nigerian contract law best practice |
+| "penalty" | MEDIUM | Nigerian common law — proportionality requirement |
+| "sole discretion" | MEDIUM | Good faith requirement |
 | "indemnify" | LOW | Standard but should be mutual |
-
-**Also checks for missing standard sections:** payment terms, delivery, cancellation, dispute resolution, liability, governing law.
 
 **Example call & result:**
 ```python
->>> analyze_contract("The buyer liable for all losses. No refund permitted.", "Nigeria")
+>>> analyze_contract("The buyer liable for all losses. No refund permitted.")
 {
     "country": "Nigeria",
     "overall_risk": "HIGH — Do NOT sign without legal review",
-    "flagged_clauses": [
-        {
-            "clause_trigger": "buyer liable for all",
-            "risk_level": "HIGH",
-            "reason": "Shifts ALL liability to buyer...",
-            "suggestion": "Replace with: 'Each party shall be liable...'"
-        },
-        {
-            "clause_trigger": "no refund",
-            "risk_level": "HIGH",
-            "reason": "Eliminates refund rights...",
-            "suggestion": "Add: 'Buyer is entitled to a full refund...'"
-        }
-    ],
+    "flagged_clauses": [...],
     "flagged_count": 2,
-    "missing_sections": ["delivery", "cancellation", "dispute resolution", ...],
-    "missing_count": 5
+    "legal_references": [
+        "Federal Competition and Consumer Protection Act, 2018 (Sections 122, 123, 136)",
+        "Labour Act, 1974 (Sections 5, 9)",
+        "Source: rag/knowledge-base/Federal Consumer Act.md, Labour Act.md"
+    ]
 }
 ```
-
-**Presentation scenario:** Trader in Nairobi uploads a ₦2M fabric purchase agreement → Agent calls this tool → Flags "buyer liable for all losses" as HIGH risk → Agent warns trader and provides negotiation language.
 
 ---
 
@@ -168,60 +176,55 @@ def analyze_contract(contract_text: str, country: str = "Nigeria") -> dict
 
 **File:** `tools/case_search.py`
 
-**Purpose:** Finds past court cases relevant to the user's situation. Searches across multiple countries and topics using keyword relevance scoring.
+**Purpose:** Searches the knowledge base for legal provisions relevant to the user's situation. Maps common scenarios (fired, evicted, defective product) to the appropriate acts and finds the most relevant sections.
 
 **Function signature:**
 ```python
-def find_similar_cases(
-    description: str,
-    country: str = "",
-    topic: str = "",
-    max_results: int = 3,
-) -> dict
+def find_similar_cases(description: str, topic: str = "", max_results: int = 5) -> dict
 ```
 
 **Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `description` | str | Yes | Plain-language description of the user's situation |
-| `country` | str | No | Filter to a specific country |
-| `topic` | str | No | Filter by topic (e.g. "wrongful dismissal") |
-| `max_results` | int | No | Max cases to return (default 3) |
+| `topic` | str | No | Filter by topic (e.g. "labor", "tenancy") |
+| `max_results` | int | No | Max provisions to return (default 5) |
 
-**Sample cases in the database:**
-| Case | Country | Topic | Outcome |
-|------|---------|-------|---------|
-| Adamu v. Sterling Industries (2020) | Nigeria | Wrongful dismissal | 12 months salary + ₦500,000 damages |
-| Okafor v. ElectroMart (2018) | Nigeria | Defective goods | Full refund + ₦50,000 damages |
-| Bello v. Skyline Properties (2019) | Nigeria | Illegal eviction | Access restored + ₦200,000 damages |
-| Musa v. Al-Bashir Enterprises (2021) | Nigeria | Unpaid wages | Full wages + 10% interest/month |
-| Mensah v. Goldfields Corp (2021) | Ghana | Unfair termination | 6 months salary + reinstatement |
-| Owusu v. Accra Housing (2022) | Ghana | Rent increase | Increase capped at 25% |
-| Wanjiku v. TechStart (2022) | Kenya | Wrongful dismissal | 12 months salary |
-| Kamau v. MegaSupply (2020) | Kenya | Unfair contract | Unfair clause voided |
+**Scenario mapping (keyword → knowledge base file):**
+| User says... | Searches... | For terms... |
+|-------------|-------------|-------------|
+| "fired", "dismissed" | `Labour Act.md` | termination, notice, dismiss |
+| "salary", "deduction" | `Labour Act.md` | wages, payment, deduction |
+| "eviction", "landlord" | `Tenancy Law.md` | possession, notice, quit |
+| "refund", "defective" | `Federal Consumer Act.md` | refund, return, defective |
+| "rights", "arrest" | `Nigeria Constitution 1999.md` | right, freedom, liberty |
+| "overtime", "leave" | `Labour Act.md` | overtime, hours, holiday, sick |
 
 **Example call & result:**
 ```python
->>> find_similar_cases("I was fired without warning from my job", country="Nigeria")
+>>> find_similar_cases("I was fired without warning from my job")
 {
     "found": True,
-    "cases": [
+    "provisions": [
         {
-            "case_name": "Adamu v. Sterling Industries Ltd (2020)",
-            "country": "Nigeria",
-            "court": "National Industrial Court",
-            "topic": "wrongful dismissal",
-            "summary": "Worker dismissed without prior warning...",
-            "outcome": "Worker awarded 12 months salary..."
+            "section": "11. Termination of contracts by notice",
+            "excerpt": "(1) Either party to a contract of employment may terminate...",
+            "source_file": "Labour Act.md",
+            "source_act": "LABOUR ACT"
+        },
+        {
+            "section": "9. Contracts: general",
+            "excerpt": "...",
+            "source_file": "Labour Act.md",
+            "source_act": "LABOUR ACT"
         }
     ],
-    "count": 1
+    "count": 2,
+    "note": "Provisions sourced from actual Nigerian legal acts in rag/knowledge-base/."
 }
 ```
 
-**Presentation scenario:** User says "I was fired without cause" → Agent calls this tool → Returns Adamu v. Sterling (12 months salary awarded) → Agent tells user the likely outcome and what to expect.
-
-**Production upgrade:** Replace keyword matching with **embedding similarity search** (Temitope's section) for semantic matching across languages.
+**Production upgrade:** Replace keyword matching with **embedding similarity search** (Temitope's section) using the FAISS vector store already set up in `rag/store.py`.
 
 ---
 
@@ -229,13 +232,12 @@ def find_similar_cases(
 
 **File:** `tools/complaint_generator.py`
 
-**Purpose:** Generates a formal complaint letter and provides step-by-step filing instructions including where to go, what to bring, fees, and expected timelines.
+**Purpose:** Generates a formal complaint letter citing real Nigerian law, with filing procedures derived from the actual statutes.
 
 **Function signature:**
 ```python
 def generate_complaint(
     complaint_type: str,
-    country: str,
     user_name: str = "[YOUR NAME]",
     opponent_name: str = "[OPPONENT NAME]",
     facts: str = "",
@@ -247,29 +249,23 @@ def generate_complaint(
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `complaint_type` | str | Yes | What happened (e.g. "illegal eviction", "unpaid wages") |
-| `country` | str | Yes | Country where the complaint will be filed |
 | `user_name` | str | No | Complainant's name |
 | `opponent_name` | str | No | Who is being complained about |
 | `facts` | str | No | Brief description of what happened |
-| `topic` | str | No | Legal topic (auto-detected from complaint_type if omitted) |
+| `topic` | str | No | Legal topic (auto-detected if omitted) |
 
-**Filing info included per country:**
-| Country | Topic | Agency | Fee |
-|---------|-------|--------|-----|
-| Nigeria | Labor | Ministry of Labor / National Industrial Court | FREE - ₦2,000 |
-| Nigeria | Tenancy | Lagos State Housing Court | ₦500 - ₦5,000 |
-| Nigeria | Consumer | FCCPC | FREE |
-| Ghana | Labor | National Labour Commission | FREE |
-| Ghana | Tenancy | Rent Tribunal, Accra | FREE |
-| Kenya | Labor | Employment and Labour Relations Court | KSh 1,000 - 5,000 |
-| Kenya | Contract | High Court / Small Claims Court | KSh 500 - 5,000+ |
+**Filing info (from real statutes):**
+| Topic | Where to File | Legal Basis |
+|-------|--------------|-------------|
+| Labor | Ministry of Labor / Magistrate Court (Labour Act Section 80) | Labour Act Sections 80-85 |
+| Tenancy | Magistrate Court / High Court Lagos (Tenancy Law Section 2), Citizens Mediation Centre (Section 32) | Lagos Tenancy Law Sections 13, 16, 24-27, 32 |
+| Consumer | FCCPC (established under FCCPA Section 3) | FCCPA Sections 17, 18, 122, 136 |
+| Constitution | Federal/State High Court | Constitution 1999, Chapter IV |
 
 **Output includes:**
-1. A ready-to-use **complaint letter** (fill in details and print)
-2. **Filing info** — where to submit, fees, documents needed, timeline
-3. **Next steps** — numbered checklist of what to do
-
-**Presentation scenario:** User says "I want to file a complaint against my landlord" → Agent calls this tool → Returns a formal letter template + "Submit at Lagos State Housing Court, ₦500 filing fee, bring lease + photos + receipts, expect 8-12 weeks."
+1. A **complaint letter** citing the specific legal basis from the knowledge base
+2. **Filing info** — where to submit, documents needed, timeline (from the actual statutes)
+3. **Next steps** — numbered checklist
 
 ---
 
@@ -277,7 +273,7 @@ def generate_complaint(
 
 **File:** `tools/jurisdiction_detector.py`
 
-**Purpose:** Auto-detects the user's country and legal jurisdiction from contextual clues in their message — currency mentions, city names, local slang/pidgin, and legal terms. Feeds into the system prompt selection (Abayomi's Prompt Engineering section).
+**Purpose:** Auto-detects the user's country and legal jurisdiction from contextual clues in their message — currency mentions, city names, local slang/pidgin, and legal terms.
 
 **Function signature:**
 ```python
@@ -291,33 +287,15 @@ def detect_jurisdiction(user_message: str, stated_country: str = "") -> dict
 | `stated_country` | str | No | If user explicitly said their country |
 
 **Detection markers per country:**
-| Country | Currencies | Cities | Slang/Pidgin | Legal Terms |
-|---------|-----------|--------|-------------|-------------|
-| Nigeria | ₦, naira, NGN | Lagos, Abuja, Kano, Ibadan... | oga, wahala, no gree, abeg... | Nigerian Labor Act, FCCPC... |
-| Ghana | GH₵, cedi, GHS | Accra, Kumasi, Tamale... | chale, charley, herh... | Act 651, NLC... |
-| Kenya | KSh, KES, shilling | Nairobi, Mombasa, Kisumu... | bana, sawa, poa, maze... | Cap 23, Employment Act 2007... |
-| South Africa | R, rand, ZAR | Johannesburg, Cape Town... | eish, yoh, lekker, braai... | CCMA, Labour Relations Act... |
-| Tanzania | TZS | Dar es Salaam, Dodoma... | bongo, mambo, karibu... | Employment and Labour Relations Act... |
+| Country | Currencies | Cities | Slang/Pidgin |
+|---------|-----------|--------|-------------|
+| Nigeria | ₦, naira, NGN | Lagos, Abuja, Kano... | oga, wahala, no gree, abeg... |
+| Ghana | GH₵, cedi, GHS | Accra, Kumasi... | chale, charley... |
+| Kenya | KSh, KES | Nairobi, Mombasa... | bana, sawa, poa... |
+| South Africa | R, rand, ZAR | Johannesburg, Cape Town... | eish, yoh, lekker... |
+| Tanzania | TZS | Dar es Salaam, Dodoma... | bongo, mambo... |
 
-**Confidence levels:**
-- **HIGH** — 3+ markers detected (e.g. city + slang + currency)
-- **MEDIUM** — 2 markers detected
-- **LOW** — 1 marker or none detected (asks user to clarify)
-
-**Example call & result:**
-```python
->>> detect_jurisdiction("My oga no gree pay me salary since March in Lagos")
-{
-    "detected_country": "Nigeria",
-    "confidence": "HIGH",
-    "method": "auto-detected from message",
-    "evidence": ["city: lagos", "slang: oga", "slang: no gree"],
-    "currency": "NGN (₦)",
-    "language_hint": "Nigerian English / Pidgin"
-}
-```
-
-**Presentation scenario:** User writes in Pidgin: "My oga no gree pay me" → Agent calls this tool → Detects Nigeria → Switches to Nigerian legal framework and cites Nigerian statutes (not generic advice).
+**Note:** The knowledge base currently covers **Nigerian law only**. When the user's country is detected, the tools search Nigerian statutes. Future expansion can add other countries' acts to `rag/knowledge-base/`.
 
 ---
 
@@ -327,8 +305,16 @@ def detect_jurisdiction(user_message: str, stated_country: str = "") -> dict
 ```python
 from tools import search_legal_database, analyze_contract, find_similar_cases
 
-# Call any tool directly
-result = search_legal_database("Nigeria", "labor", "salary")
+# Search real statutes
+result = search_legal_database("labor", "deduction")
+print(result)
+
+# Analyze a contract against real Nigerian law
+result = analyze_contract("The buyer liable for all losses. No refund.")
+print(result)
+
+# Find relevant provisions for a situation
+result = find_similar_cases("my landlord locked me out")
 print(result)
 ```
 
@@ -341,7 +327,7 @@ from tools import ALL_TOOLS  # list of all 5 tool functions
 
 ## Wiring Into the Agent (Once Teammates Are Ready)
 
-The tools module is **standalone** — it has no dependency on the agent, RAG, or embeddings modules. Once your teammates have their sections built, here is how to bring everything together.
+The tools module is **standalone** — it reads directly from `rag/knowledge-base/` with no dependency on the agent, RAG pipeline, or embeddings modules. Once teammates have their sections built, here is how to bring everything together.
 
 ### Step 1: Samuel (Agents) — Create the agent in `legal_agents/__init__.py`
 
@@ -378,33 +364,35 @@ result = Runner.run_sync(
 print(result.final_output)
 ```
 
-### Step 3: Kelvin (RAG) — Swap sample data for real retrieval
+### Step 3: Kelvin (RAG) — Upgrade search with vector retrieval
 
-In `tools/legal_search.py`, replace the `LEGAL_DATABASE` dict with a call to the RAG pipeline:
-
-```python
-# Before (demo):
-results = LEGAL_DATABASE[country][topic]
-
-# After (production):
-from rag import retrieve_statutes
-results = retrieve_statutes(country=country, topic=topic, query=keyword)
-```
-
-### Step 4: Temitope (Embeddings) — Swap keyword matching for vector search
-
-In `tools/case_search.py`, replace the keyword scoring loop with embedding similarity:
+In `tools/legal_search.py`, the `_search_sections` function currently does keyword search. Replace with the RAG pipeline from `rag/query.py`:
 
 ```python
-# Before (demo):
-score = sum(1 for kw in case["keywords"] if kw in desc_lower)
+# Before (current — keyword search):
+matches = _search_sections(text, search_term)
 
-# After (production):
-from embeddings import get_similar_cases
-results = get_similar_cases(description=description, country=country, top_k=max_results)
+# After (production — use Kelvin's RAG pipeline):
+from rag.query import query_knowledge_base
+matches = query_knowledge_base(search_term, topic=topic)
 ```
 
-### Step 5: Abayomi (Prompts) — Use jurisdiction detection in the system prompt
+### Step 4: Temitope (Embeddings) — Upgrade case search with vector similarity
+
+In `tools/case_search.py`, replace keyword matching with the FAISS store from `rag/store.py`:
+
+```python
+# Before (current — keyword scoring):
+sections = _find_relevant_sections(text, source["terms"])
+
+# After (production — use embeddings):
+from rag.store import load_vector_store
+from rag.embeddings import get_embeddings
+store = load_vector_store()
+results = store.similarity_search(description, k=max_results)
+```
+
+### Step 5: Abayomi (Prompts) — Use jurisdiction detection for prompt selection
 
 The `detect_jurisdiction` tool returns the user's country. Use this to select the right system prompt:
 
@@ -422,8 +410,8 @@ system_prompt = load_prompt_for_country(country)  # Abayomi provides this
 
 | Teammate | Section | What They Need From This Module | What They Plug Into |
 |----------|---------|-------------------------------|---------------------|
-| **Kelvin** | RAG | `search_legal_database` calls their retrieval function | Replace `LEGAL_DATABASE` dict in `legal_search.py` |
-| **Temitope** | Embeddings | `find_similar_cases` calls their similarity search | Replace keyword scoring in `case_search.py` |
+| **Kelvin** | RAG | `search_legal_database` already reads from `rag/knowledge-base/`. Upgrade: swap keyword search for RAG pipeline in `rag/query.py` | `_search_sections()` in `legal_search.py` |
+| **Temitope** | Embeddings | `find_similar_cases` already reads from `rag/knowledge-base/`. Upgrade: swap keyword scoring for FAISS similarity from `rag/store.py` | `_find_relevant_sections()` in `case_search.py` |
 | **Abayomi** | Prompts | `detect_jurisdiction` returns country for prompt selection | Use output to pick the right system prompt |
 | **Samuel** | Agents / MCP | `ALL_TOOLS` list ready to pass to `Agent()` | Wire into `legal_agents/__init__.py` |
 
@@ -443,7 +431,7 @@ system_prompt = load_prompt_for_country(country)  # Abayomi provides this
 │   │                                                 │     │
 │   │  detect_jurisdiction ──► search_legal_database  │     │
 │   │                              ▲                  │     │
-│   │                              │ RAG results      │     │
+│   │                              │ RAG upgrade      │     │
 │   │                         ┌────┴────┐             │     │
 │   │                         │ Kelvin  │             │     │
 │   │                         │  (RAG)  │             │     │
@@ -451,15 +439,17 @@ system_prompt = load_prompt_for_country(country)  # Abayomi provides this
 │   │                                                 │     │
 │   │  find_similar_cases                             │     │
 │   │         ▲                                       │     │
-│   │         │ embeddings                            │     │
+│   │         │ embeddings upgrade                    │     │
 │   │    ┌────┴──────┐                                │     │
 │   │    │ Temitope  │                                │     │
 │   │    │(Embeddings)│                               │     │
 │   │    └───────────┘                                │     │
 │   │                                                 │     │
-│   │  analyze_contract                               │     │
-│   │  generate_complaint                             │     │
+│   │  analyze_contract (cites FCCPA, Labour Act)     │     │
+│   │  generate_complaint (cites Tenancy Law, etc.)   │     │
 │   └─────────────────────────────────────────────────┘     │
+│                                                          │
+│   All tools read from: rag/knowledge-base/*.md           │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -467,17 +457,25 @@ system_prompt = load_prompt_for_country(country)  # Abayomi provides this
 
 ## Testing
 
-All tools can be tested with no external dependencies:
+All tools can be tested with no external dependencies (they read the markdown files directly):
 
 ```bash
 python3 -c "
 from tools import search_legal_database, analyze_contract, find_similar_cases, generate_complaint, detect_jurisdiction
 
-# Test each tool
-print(search_legal_database('Nigeria', 'labor', 'deduction'))
+# Search real statutes
+print(search_legal_database('labor', 'deduction'))
+
+# Analyze contract against real Nigerian law
 print(analyze_contract('The buyer liable for all losses. No refund.'))
-print(find_similar_cases('I was fired without warning', country='Nigeria'))
-print(generate_complaint('illegal eviction', 'Nigeria'))
+
+# Find relevant provisions
+print(find_similar_cases('I was fired without warning'))
+
+# Generate complaint with real filing procedures
+print(generate_complaint('illegal eviction'))
+
+# Detect jurisdiction
 print(detect_jurisdiction('My oga no gree pay me in Lagos'))
 "
 ```
@@ -486,10 +484,10 @@ print(detect_jurisdiction('My oga no gree pay me in Lagos'))
 
 ## Production Upgrades (Future)
 
-| Current (Demo) | Production Upgrade |
-|----------------|-------------------|
-| `LEGAL_DATABASE` dict in Python | PostgreSQL / vector DB with real digitized statutes |
-| Keyword matching in `find_similar_cases` | Embedding similarity search (cosine distance) |
+| Current (Working) | Production Upgrade |
+|-------------------|-------------------|
+| Keyword search through `rag/knowledge-base/*.md` files | Use Kelvin's RAG pipeline with vector retrieval (`rag/query.py`) |
+| Keyword scoring in `find_similar_cases` | Use Temitope's FAISS embeddings from `rag/store.py` |
 | Pattern matching in `analyze_contract` | NLP clause extraction + fine-tuned classifier |
-| Hardcoded filing info in `generate_complaint` | API integration with court systems |
+| Nigerian law only | Add other African countries' acts to `rag/knowledge-base/` |
 | Keyword detection in `detect_jurisdiction` | Language model classification + IP geolocation |

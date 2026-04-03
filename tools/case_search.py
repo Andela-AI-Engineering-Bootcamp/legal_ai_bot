@@ -1,179 +1,221 @@
 """
 Tool: find_similar_cases
 =========================
-Finds past court cases relevant to the user's situation.
+Searches the knowledge base files in rag/knowledge-base/ for sections
+relevant to the user's legal situation.
 
-In production this would use embeddings + vector search (Kelvin's section)
-to find semantically similar cases across languages and countries.
-For the demo we use a curated sample database.
+Instead of a hardcoded case database, this tool searches across the actual
+Nigerian legal acts to find provisions that apply to the user's scenario.
+
+In production, this would use embeddings + vector search (via the rag/ module)
+to find semantically similar content across documents.
 
 Presentation example:
     User:  "I was fired without warning. What can I expect?"
-    Agent: calls find_similar_cases(description="fired without warning", country="Nigeria")
-    Tool returns similar precedents → agent tells user likely outcomes.
+    Agent: calls find_similar_cases(description="fired without warning")
+    Tool searches Labour Act for termination provisions → returns Section 11.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 # ---------------------------------------------------------------------------
-# Sample case database (replace with vector DB lookup in production)
+# Knowledge base location
 # ---------------------------------------------------------------------------
 
-CASE_DATABASE: list[dict] = [
-    # --- Nigeria ---
-    {
-        "case_name": "Adamu v. Sterling Industries Ltd (2020)",
-        "country": "Nigeria",
-        "court": "National Industrial Court",
-        "topic": "wrongful dismissal",
-        "summary": "Worker dismissed without prior warning or documented cause. Court ruled termination unfair.",
-        "outcome": "Worker awarded 12 months salary as compensation plus ₦500,000 general damages.",
-        "keywords": ["fired", "dismissed", "termination", "no warning", "unfair"],
-    },
-    {
-        "case_name": "Okafor v. ElectroMart (2018)",
-        "country": "Nigeria",
-        "court": "Lagos State High Court",
-        "topic": "defective goods",
-        "summary": "Buyer purchased a phone that stopped working after 1 week. Seller refused refund.",
-        "outcome": "Seller ordered to refund full purchase price plus ₦50,000 damages. Phone deemed unfit for purpose.",
-        "keywords": ["refund", "defective", "phone", "product", "consumer"],
-    },
-    {
-        "case_name": "Bello v. Skyline Properties (2019)",
-        "country": "Nigeria",
-        "court": "Lagos State Housing Court",
-        "topic": "illegal eviction",
-        "summary": "Landlord changed locks while tenant was at work without a court order.",
-        "outcome": "Landlord ordered to restore access, pay ₦200,000 damages for unlawful eviction.",
-        "keywords": ["eviction", "landlord", "locked out", "tenant", "rent"],
-    },
-    {
-        "case_name": "Musa v. Al-Bashir Enterprises (2021)",
-        "country": "Nigeria",
-        "court": "National Industrial Court",
-        "topic": "unpaid wages",
-        "summary": "Employer withheld 3 months salary claiming 'cash flow issues'.",
-        "outcome": "Employer ordered to pay all outstanding wages plus 10% interest per month of delay.",
-        "keywords": ["salary", "unpaid", "wages", "deduction", "owed"],
-    },
-    # --- Ghana ---
-    {
-        "case_name": "Mensah v. Goldfields Corp (2021)",
-        "country": "Ghana",
-        "court": "Court of Appeal, Accra",
-        "topic": "unfair termination",
-        "summary": "Employee dismissed after reporting safety violations. Court found dismissal retaliatory.",
-        "outcome": "Employee awarded 6 months salary plus reinstatement to former position.",
-        "keywords": ["fired", "dismissed", "whistleblower", "retaliation", "termination"],
-    },
-    {
-        "case_name": "Owusu v. Accra Housing Ltd (2022)",
-        "country": "Ghana",
-        "court": "Rent Tribunal, Accra",
-        "topic": "rent increase",
-        "summary": "Landlord increased rent by 40% without proper notice. Tenant challenged at tribunal.",
-        "outcome": "Increase reduced to 25% (statutory max). Landlord warned for non-compliance.",
-        "keywords": ["rent", "increase", "landlord", "tenant", "eviction"],
-    },
-    # --- Kenya ---
-    {
-        "case_name": "Wanjiku v. TechStart Ltd (2022)",
-        "country": "Kenya",
-        "court": "Employment and Labour Relations Court",
-        "topic": "wrongful dismissal",
-        "summary": "Software developer terminated without valid reason after 2 years of employment.",
-        "outcome": "Worker awarded 12 months salary as compensation. Employer to issue certificate of service.",
-        "keywords": ["fired", "dismissed", "termination", "no reason", "unfair"],
-    },
-    {
-        "case_name": "Kamau v. MegaSupply Ltd (2020)",
-        "country": "Kenya",
-        "court": "High Court, Nairobi",
-        "topic": "unfair contract",
-        "summary": "Trader signed supply contract with one-sided liability clause. Court found it unconscionable.",
-        "outcome": "Unfair clause voided under Law of Contract Act, Cap 23 Section 14. Contract renegotiated.",
-        "keywords": ["contract", "unfair", "liability", "supplier", "unconscionable"],
-    },
-]
+KNOWLEDGE_BASE_DIR = Path(__file__).resolve().parent.parent / "rag" / "knowledge-base"
+
+# Map common legal scenarios to relevant files and search terms
+SCENARIO_KEYWORDS: dict[str, list[dict]] = {
+    "fired": [
+        {"file": "Labour Act.md", "terms": ["terminat", "notice", "dismiss", "contract"]},
+    ],
+    "dismissed": [
+        {"file": "Labour Act.md", "terms": ["terminat", "notice", "dismiss"]},
+    ],
+    "salary": [
+        {"file": "Labour Act.md", "terms": ["wages", "payment", "deduction", "salary"]},
+    ],
+    "deduction": [
+        {"file": "Labour Act.md", "terms": ["deduction", "wages"]},
+    ],
+    "eviction": [
+        {"file": "Tenancy Law.md", "terms": ["possession", "evict", "notice", "quit"]},
+    ],
+    "landlord": [
+        {"file": "Tenancy Law.md", "terms": ["landlord", "tenant", "rent", "possession"]},
+    ],
+    "rent": [
+        {"file": "Tenancy Law.md", "terms": ["rent", "tenancy", "notice", "arrears"]},
+    ],
+    "refund": [
+        {"file": "Federal Consumer Act.md", "terms": ["refund", "return", "defective"]},
+        {"file": "Consumer Act.md", "terms": ["refund", "return", "defective"]},
+    ],
+    "defective": [
+        {"file": "Federal Consumer Act.md", "terms": ["defective", "return", "refund", "liability"]},
+    ],
+    "consumer": [
+        {"file": "Federal Consumer Act.md", "terms": ["consumer", "right", "protection"]},
+    ],
+    "rights": [
+        {"file": "Nigeria Constitution 1999.md", "terms": ["right", "freedom", "liberty"]},
+    ],
+    "arrest": [
+        {"file": "Nigeria Constitution 1999.md", "terms": ["arrest", "detention", "liberty"]},
+    ],
+    "overtime": [
+        {"file": "Labour Act.md", "terms": ["overtime", "hours", "work"]},
+    ],
+    "leave": [
+        {"file": "Labour Act.md", "terms": ["holiday", "leave", "annual", "sick"]},
+    ],
+    "contract": [
+        {"file": "Labour Act.md", "terms": ["contract", "employment", "terms"]},
+        {"file": "Federal Consumer Act.md", "terms": ["contract", "agreement", "terms"]},
+    ],
+    "food": [
+        {"file": "Food And Drugs Act.md", "terms": ["food", "drug", "manufacture", "sale"]},
+    ],
+}
+
+
+def _load_file(filename: str) -> str | None:
+    """Load a knowledge base file and return its text."""
+    filepath = KNOWLEDGE_BASE_DIR / filename
+    if not filepath.exists():
+        return None
+    return filepath.read_text(encoding="utf-8")
+
+
+def _find_relevant_sections(text: str, terms: list[str], max_sections: int = 3) -> list[dict]:
+    """Find sections in a legal document that match the given terms."""
+    lines = text.split("\n")
+    sections: list[dict] = []
+    current_section = ""
+    current_section_start = 0
+    current_section_lines: list[str] = []
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        # Detect section headings
+        if stripped.startswith("## ") or stripped.startswith("### "):
+            # Save previous section if it had matches
+            if current_section and current_section_lines:
+                section_text = "\n".join(current_section_lines)
+                score = sum(
+                    section_text.lower().count(term.lower())
+                    for term in terms
+                )
+                if score > 0:
+                    sections.append({
+                        "section": current_section,
+                        "excerpt": section_text[:800].strip(),
+                        "relevance_score": score,
+                    })
+
+            current_section = stripped.lstrip("#").strip()
+            current_section_start = i
+            current_section_lines = []
+        else:
+            current_section_lines.append(line)
+
+    # Don't forget the last section
+    if current_section and current_section_lines:
+        section_text = "\n".join(current_section_lines)
+        score = sum(section_text.lower().count(term.lower()) for term in terms)
+        if score > 0:
+            sections.append({
+                "section": current_section,
+                "excerpt": section_text[:800].strip(),
+                "relevance_score": score,
+            })
+
+    # Sort by relevance and return top results
+    sections.sort(key=lambda s: s["relevance_score"], reverse=True)
+    return sections[:max_sections]
 
 
 def find_similar_cases(
     description: str,
-    country: str = "",
     topic: str = "",
-    max_results: int = 3,
+    max_results: int = 5,
 ) -> dict:
-    """Find past court cases similar to the user's legal situation.
+    """Find relevant legal provisions for the user's situation from the knowledge base.
 
     Use this tool when the user describes a dispute and wants to know
-    what happened in similar cases, likely outcomes, or precedents.
+    what the law says about their situation, what provisions apply, or
+    what outcomes to expect.
 
     Args:
         description: Plain-language description of the user's situation.
-        country:     Optional — filter to a specific country.
-        topic:       Optional — filter by topic (e.g. "wrongful dismissal").
-        max_results: Maximum number of cases to return (default 3).
+        topic:       Optional — filter by topic (e.g. "labor", "tenancy", "consumer").
+        max_results: Maximum number of relevant sections to return (default 5).
 
     Returns:
-        A dict with matching cases, including outcomes and court details.
+        A dict with relevant legal provisions from the knowledge base.
     """
     if not description or not description.strip():
-        return {"error": "Please describe your legal situation so I can find similar cases."}
+        return {"error": "Please describe your legal situation so I can find relevant provisions."}
 
     desc_lower = description.lower()
-    query_words = set(desc_lower.split())
 
-    scored_cases: list[tuple[int, dict]] = []
+    # Determine which files and terms to search
+    files_to_search: list[dict] = []
 
-    for case in CASE_DATABASE:
-        # Filter by country if specified
-        if country and case["country"].lower() != country.lower():
+    # Match scenario keywords from description
+    for keyword, sources in SCENARIO_KEYWORDS.items():
+        if keyword in desc_lower:
+            for source in sources:
+                if source not in files_to_search:
+                    files_to_search.append(source)
+
+    # If no specific match, search all files with words from description
+    if not files_to_search:
+        desc_words = [w for w in desc_lower.split() if len(w) > 3]
+        all_files = [
+            "Labour Act.md",
+            "Tenancy Law.md",
+            "Federal Consumer Act.md",
+            "Consumer Act.md",
+            "Nigeria Constitution 1999.md",
+            "Food And Drugs Act.md",
+        ]
+        files_to_search = [{"file": f, "terms": desc_words} for f in all_files]
+
+    # Search each file
+    all_results = []
+    for source in files_to_search:
+        text = _load_file(source["file"])
+        if text is None:
             continue
-        # Filter by topic if specified
-        if topic and topic.lower() not in case["topic"].lower():
-            continue
 
-        # Score by keyword overlap with description
-        score = 0
-        for kw in case["keywords"]:
-            if kw in desc_lower:
-                score += 2  # exact keyword match
-            elif any(kw in word or word in kw for word in query_words):
-                score += 1  # partial match
+        sections = _find_relevant_sections(text, source["terms"], max_sections=3)
+        for section in sections:
+            section["source_file"] = source["file"]
+            section["source_act"] = text.split("\n")[0].strip("# ").strip()
 
-        # Also check summary
-        for word in query_words:
-            if len(word) > 3 and word in case["summary"].lower():
-                score += 1
+        all_results.extend(sections)
 
-        if score > 0:
-            scored_cases.append((score, case))
+    # Sort all results by relevance and limit
+    all_results.sort(key=lambda s: s["relevance_score"], reverse=True)
+    top_results = all_results[:max_results]
 
-    # Sort by relevance score (highest first)
-    scored_cases.sort(key=lambda x: x[0], reverse=True)
-    top_cases = [case for _, case in scored_cases[:max_results]]
-
-    if not top_cases:
+    if not top_results:
         return {
             "found": False,
-            "message": "No similar cases found. Try broadening your description or removing country/topic filters.",
+            "message": "No relevant provisions found. Try describing your situation with different terms.",
         }
+
+    # Clean up results for output
+    for r in top_results:
+        del r["relevance_score"]
 
     return {
         "found": True,
         "query": description,
-        "cases": [
-            {
-                "case_name": c["case_name"],
-                "country": c["country"],
-                "court": c["court"],
-                "topic": c["topic"],
-                "summary": c["summary"],
-                "outcome": c["outcome"],
-            }
-            for c in top_cases
-        ],
-        "count": len(top_cases),
-        "note": "These are illustrative precedents. Actual outcomes depend on case specifics.",
+        "provisions": top_results,
+        "count": len(top_results),
+        "note": "Provisions sourced from actual Nigerian legal acts in rag/knowledge-base/.",
     }

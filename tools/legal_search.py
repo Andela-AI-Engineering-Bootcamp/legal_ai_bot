@@ -1,192 +1,165 @@
 """
 Tool: search_legal_database
 ============================
-Looks up statutes, acts, and legal provisions for African countries.
+Looks up statutes and legal provisions from the knowledge base files
+in rag/knowledge-base/.
 
-This is the core reference tool — when a citizen asks "Is X legal?",
-the agent calls this tool to retrieve the actual statute text so it can
-ground its answer in real law (works hand-in-hand with the RAG module).
+The knowledge base contains real Nigerian legal acts:
+    - Labour Act (1974 No. 21)
+    - Lagos Tenancy Law (2011)
+    - Federal Competition and Consumer Protection Act (2018)
+    - Consumer Act
+    - Food and Drugs Act
+    - Nigeria Constitution (1999)
+    - Tenancy Disputes (academic paper)
 
 Presentation example:
     User:  "My boss deducted ₦10,000 from my salary for being late."
-    Agent: calls search_legal_database(country="Nigeria", topic="salary deduction")
-    Tool returns Section 12 of the Nigerian Labor Act → agent cites it.
+    Agent: calls search_legal_database(topic="labor", keyword="deduction")
+    Tool searches the Labour Act and returns Section 5 text.
 """
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 # ---------------------------------------------------------------------------
-# Sample legal database (replace with a real DB / vector store in production)
+# Knowledge base location and topic-to-file mapping
 # ---------------------------------------------------------------------------
 
-LEGAL_DATABASE: dict[str, dict[str, list[dict]]] = {
-    "Nigeria": {
-        "labor": [
-            {
-                "statute": "Nigerian Labor Act, 2004",
-                "section": "Section 12",
-                "title": "Permissible Deductions from Wages",
-                "text": (
-                    "No employer shall make any deduction from the wages of a "
-                    "worker except: (a) Taxes, (b) Contributions to provident "
-                    "or pension funds, (c) Union dues, (d) Amounts owing to the "
-                    "employer by the worker. Deductions for lateness, mistakes, "
-                    "or poor performance are PROHIBITED."
-                ),
-                "penalty": "Worker may claim full refund plus damages at Ministry of Labor (FREE).",
-            },
-            {
-                "statute": "Nigerian Labor Act, 2004",
-                "section": "Section 11(1)",
-                "title": "Payment of Wages",
-                "text": (
-                    "Wages shall be paid at intervals not exceeding one month "
-                    "and in legal tender. Wages must not be paid in vouchers, "
-                    "coupons, or any form other than legal tender."
-                ),
-                "penalty": "Employer liable for unpaid wages plus interest.",
-            },
-        ],
-        "tenancy": [
-            {
-                "statute": "Lagos Tenancy Law, 2011",
-                "section": "Section 13",
-                "title": "Notice to Quit",
-                "text": (
-                    "A landlord must give a tenant written notice of at least "
-                    "6 months before terminating a yearly tenancy. Locking out "
-                    "a tenant without a valid court order is illegal."
-                ),
-                "penalty": "Tenant may sue for unlawful eviction at Lagos State Housing Court (₦500 filing fee).",
-            },
-        ],
-        "consumer": [
-            {
-                "statute": "Federal Competition and Consumer Protection Act, 2019 (FCCPA)",
-                "section": "Section 114",
-                "title": "Right to Return Defective Goods",
-                "text": (
-                    "A consumer who purchases goods that are defective or not "
-                    "fit for purpose is entitled to a repair, replacement, or "
-                    "full refund within 30 days of purchase."
-                ),
-                "penalty": "File complaint at FCCPC (Federal Competition & Consumer Protection Commission) - FREE.",
-            },
-        ],
-    },
-    "Ghana": {
-        "labor": [
-            {
-                "statute": "Ghana Labour Act, 2003 (Act 651)",
-                "section": "Section 70",
-                "title": "Unfair Termination",
-                "text": (
-                    "A termination of employment is unfair if no valid reason "
-                    "is given relating to the worker's capacity, conduct, or "
-                    "operational requirements. Employer must give written "
-                    "reasons within 7 days of request."
-                ),
-                "penalty": "Worker may file at National Labour Commission (NLC) - FREE.",
-            },
-        ],
-        "tenancy": [
-            {
-                "statute": "Ghana Rent Act, 1963 (Act 220)",
-                "section": "Section 8",
-                "title": "Rent Increase Limits",
-                "text": (
-                    "Rent may only be increased at lease renewal with at least "
-                    "90 days written notice. Increase must not exceed 25% of "
-                    "the current rent in a single adjustment."
-                ),
-                "penalty": "Tenant may file at Rent Tribunal (Accra) - FREE.",
-            },
-        ],
-    },
-    "Kenya": {
-        "labor": [
-            {
-                "statute": "Employment Act, 2007 (Kenya)",
-                "section": "Section 45",
-                "title": "Protection Against Unfair Termination",
-                "text": (
-                    "No employer shall terminate the employment of an employee "
-                    "unfairly. A termination is unfair if the employer fails to "
-                    "prove a valid and fair reason connected with the employee's "
-                    "capacity, conduct, or operational requirements."
-                ),
-                "penalty": "Employee may claim up to 12 months wages as compensation.",
-            },
-        ],
-        "contract": [
-            {
-                "statute": "Law of Contract Act, Cap 23 (Kenya)",
-                "section": "Section 14",
-                "title": "Unconscionable Contracts",
-                "text": (
-                    "A contract or clause that is unconscionable — meaning "
-                    "grossly unfair and one-sided — may be declared void by "
-                    "the court. Standard commercial practice in the industry "
-                    "is used as benchmark."
-                ),
-                "penalty": "Aggrieved party may apply to court to void the unfair clause.",
-            },
-        ],
-    },
+KNOWLEDGE_BASE_DIR = Path(__file__).resolve().parent.parent / "rag" / "knowledge-base"
+
+TOPIC_FILE_MAP: dict[str, list[dict[str, str]]] = {
+    "labor": [
+        {"file": "Labour Act.md", "act_name": "Labour Act, 1974 (No. 21)"},
+    ],
+    "tenancy": [
+        {"file": "Tenancy Law.md", "act_name": "Lagos Tenancy Law, 2011"},
+        {"file": "Tenancy Disputes.md", "act_name": "Tenancy Disputes (Research)"},
+    ],
+    "consumer": [
+        {"file": "Federal Consumer Act.md", "act_name": "Federal Competition and Consumer Protection Act, 2018"},
+        {"file": "Consumer Act.md", "act_name": "Consumer Act"},
+    ],
+    "constitution": [
+        {"file": "Nigeria Constitution 1999.md", "act_name": "Constitution of the Federal Republic of Nigeria, 1999"},
+    ],
+    "food": [
+        {"file": "Food And Drugs Act.md", "act_name": "Food and Drugs Act"},
+    ],
 }
 
-# All topics present in the database (for validation)
-ALL_TOPICS = {"labor", "tenancy", "consumer", "contract", "family", "criminal"}
+ALL_TOPICS = set(TOPIC_FILE_MAP.keys())
 
 
-def search_legal_database(country: str, topic: str, keyword: str = "") -> dict:
-    """Search African legal statutes by country and topic.
+def _load_file(filename: str) -> str | None:
+    """Load a knowledge base file and return its text, or None if not found."""
+    filepath = KNOWLEDGE_BASE_DIR / filename
+    if not filepath.exists():
+        return None
+    return filepath.read_text(encoding="utf-8")
+
+
+def _search_sections(text: str, keyword: str, context_lines: int = 15) -> list[dict]:
+    """Search through a legal document for sections matching a keyword.
+
+    Returns matching sections with surrounding context.
+    """
+    lines = text.split("\n")
+    keyword_lower = keyword.lower()
+    results = []
+    current_section = ""
+    current_section_line = 0
+
+    for i, line in enumerate(lines):
+        # Track current section heading
+        stripped = line.strip()
+        if stripped.startswith("## ") or stripped.startswith("### "):
+            current_section = stripped.lstrip("#").strip()
+            current_section_line = i
+
+        # Check for keyword match
+        if keyword_lower in line.lower():
+            # Gather context: from section heading to context_lines after match
+            start = max(0, current_section_line if current_section_line > i - 20 else i - 5)
+            end = min(len(lines), i + context_lines)
+            excerpt = "\n".join(lines[start:end]).strip()
+
+            results.append({
+                "section": current_section or f"Line {i + 1}",
+                "excerpt": excerpt,
+                "line_number": i + 1,
+            })
+
+    # Deduplicate overlapping results by section
+    seen_sections = set()
+    unique_results = []
+    for r in results:
+        if r["section"] not in seen_sections:
+            seen_sections.add(r["section"])
+            unique_results.append(r)
+
+    return unique_results
+
+
+def search_legal_database(topic: str, keyword: str = "", section: str = "") -> dict:
+    """Search Nigerian legal statutes from the knowledge base by topic and keyword.
 
     Use this tool when the user asks about their legal rights, whether
     something is legal/illegal, or what the law says about a topic.
 
     Args:
-        country: The African country (e.g. "Nigeria", "Ghana", "Kenya").
-        topic:   Legal topic — one of: labor, tenancy, consumer, contract, family, criminal.
-        keyword: Optional keyword to narrow results (e.g. "salary deduction", "eviction").
+        topic:   Legal topic — one of: labor, tenancy, consumer, constitution, food.
+        keyword: Keyword to search for within the act (e.g. "deduction", "eviction", "notice").
+        section: Optional specific section number to look up (e.g. "5", "13").
 
     Returns:
-        A dict with matching statutes and provisions, or an error message.
+        A dict with matching statute sections and their text.
     """
-    country_data = LEGAL_DATABASE.get(country)
-    if not country_data:
+    topic_lower = topic.lower()
+
+    if topic_lower not in TOPIC_FILE_MAP:
         return {
             "found": False,
-            "message": f"No legal data available for '{country}'. Available countries: {', '.join(LEGAL_DATABASE.keys())}.",
+            "message": f"No data for topic '{topic}'. Available topics: {', '.join(sorted(ALL_TOPICS))}.",
         }
 
-    topic_data = country_data.get(topic.lower())
-    if not topic_data:
-        available = ", ".join(country_data.keys())
+    if not keyword and not section:
         return {
             "found": False,
-            "message": f"No data for topic '{topic}' in {country}. Available topics: {available}.",
+            "message": "Please provide a keyword or section number to search for.",
         }
 
-    # If a keyword is provided, filter results
-    results = topic_data
-    if keyword:
-        kw = keyword.lower()
-        results = [
-            entry for entry in topic_data
-            if kw in entry["text"].lower() or kw in entry["title"].lower()
-        ]
+    all_results = []
 
-    if not results:
+    for source in TOPIC_FILE_MAP[topic_lower]:
+        text = _load_file(source["file"])
+        if text is None:
+            continue
+
+        search_term = section if section else keyword
+
+        matches = _search_sections(text, search_term)
+        for match in matches:
+            match["source_act"] = source["act_name"]
+            match["source_file"] = source["file"]
+
+        all_results.extend(matches)
+
+    if not all_results:
+        search_desc = f"section '{section}'" if section else f"keyword '{keyword}'"
         return {
             "found": False,
-            "message": f"No results matching '{keyword}' under {country} → {topic}.",
+            "message": f"No results matching {search_desc} under topic '{topic}'.",
         }
 
+    # Limit to top 5 most relevant results
     return {
         "found": True,
-        "country": country,
         "topic": topic,
-        "results": results,
-        "count": len(results),
+        "search_term": section or keyword,
+        "results": all_results[:5],
+        "count": len(all_results[:5]),
+        "note": "Excerpts from actual Nigerian legal acts in rag/knowledge-base/.",
     }
