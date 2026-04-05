@@ -1,4 +1,5 @@
 import gradio as gr
+from rag.doc_chunk import rag_query_answer
 
 from legal_agents.runner import run_legal_agent_sync
 
