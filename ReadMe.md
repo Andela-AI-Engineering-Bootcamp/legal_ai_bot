@@ -1,3 +1,9 @@
+---
+title: legal_ai_bot
+app_file: app.py
+sdk: gradio
+sdk_version: 6.11.0
+---
 # Legal AI Bot
 
 A **Pan-African legal information assistant** with a focus on Nigerian law: a **Gradio** chat UI, an **agent** built with the **OpenAI Agents SDK**, **retrieval-augmented generation (RAG)** over a Nigerian statute corpus, **MCP-exposed tools** for structured lookups, and **web search** for public case law and commentary.

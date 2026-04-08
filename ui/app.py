@@ -156,14 +156,14 @@ footer { display: none !important; }
 
 def legal_aid_chat_interface():
     with gr.Blocks(
-        title="Pan-African Legal Aid Chatbot",
-        css=CUSTOM_CSS,
-        theme=gr.themes.Soft(
-            primary_hue=gr.themes.colors.green,
-            secondary_hue=gr.themes.colors.emerald,
-            neutral_hue=gr.themes.colors.gray,
-            font=gr.themes.GoogleFont("Inter"),
-        ),
+            title="Pan-African Legal Aid Chatbot",
+            css=CUSTOM_CSS,
+            theme=gr.themes.Soft(
+                primary_hue=gr.themes.colors.green,
+                secondary_hue=gr.themes.colors.emerald,
+                neutral_hue=gr.themes.colors.gray,
+                font=gr.themes.GoogleFont("Inter"),
+            ),
     ) as interface:
 
         # ── Header ──
@@ -211,10 +211,14 @@ def legal_aid_chat_interface():
         # ── Examples ──
         with gr.Accordion("Example questions", open=False):
             with gr.Row():
-                ex1 = gr.Button("My Boss deducted ₦10k for lateness. Is it legal?", elem_classes="example-btn", size="sm")
-                ex2 = gr.Button("I want to sue my landlord for illegal eviction in Lagos. What's the process?", elem_classes="example-btn", size="sm")
+                ex1 = gr.Button("My Boss deducted ₦10k for lateness. Is it legal?", elem_classes="example-btn",
+                                size="sm")
+                ex2 = gr.Button("I want to sue my landlord for illegal eviction in Lagos. What's the process?",
+                                elem_classes="example-btn", size="sm")
             with gr.Row():
-                ex3 = gr.Button("I bought a phone in Nigeria that broke after 1 week.  The shop won't refund. What are my rights?", elem_classes="example-btn", size="sm")
+                ex3 = gr.Button(
+                    "I bought a phone in Nigeria that broke after 1 week.  The shop won't refund. What are my rights?",
+                    elem_classes="example-btn", size="sm")
                 # ex4 = gr.Button("I was fired without warning — what can I do?", elem_classes="example-btn", size="sm")
             # with gr.Row():
             #     ex5 = gr.Button("Review this contract for risky clauses", elem_classes="example-btn", size="sm")
@@ -327,13 +331,10 @@ def legal_aid_chat_interface():
 
         wire_example(ex1, "My Boss deducted ₦10k for lateness. Is it legal?")
         wire_example(ex2, "I want to sue my landlord for illegal eviction in Lagos. What's the process?")
-        wire_example(ex3, "I bought a phone in Nigeria that broke after 1 week.  The shop won't refund. What are my rights?")
+        wire_example(ex3,
+                     "I bought a phone in Nigeria that broke after 1 week.  The shop won't refund. What are my rights?")
         # wire_example(ex4, "I was fired without warning — what can I do?")
         # wire_example(ex5, "Review this contract for risky clauses")
         # wire_example(ex6, "How do I file a complaint against my employer?")
 
-    return interface.launch(
-        server_name="127.0.0.1",
-        server_port=7860,
-        inbrowser=True,
-    )
+    return interface.launch()
