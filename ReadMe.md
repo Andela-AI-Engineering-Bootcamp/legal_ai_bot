@@ -142,7 +142,7 @@ From the repository root:
 ```bash
 uv sync
 cp .env.example .env   # then edit .env
-uv run python main.py
+uv run python app.py
 ```
 
 The app prints a short banner and opens **Gradio** at **http://127.0.0.1:7860** (see `ui/app.py` for host/port).
@@ -161,7 +161,7 @@ Expect stdio MCP traffic on stdin/stdout; useful for MCP clients or troubleshoot
 
 ```
 legal_ai_bot/
-├── main.py                       # Entry: launches Gradio UI
+├── app.py                       # Entry: launches Gradio UI
 ├── pyproject.toml                # Dependencies and project metadata
 ├── .env.example                  # Environment variable template
 ├── ui/
