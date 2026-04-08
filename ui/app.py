@@ -211,14 +211,14 @@ def legal_aid_chat_interface():
         # ── Examples ──
         with gr.Accordion("Example questions", open=False):
             with gr.Row():
-                ex1 = gr.Button("My boss deducted my salary for being late", elem_classes="example-btn", size="sm")
-                ex2 = gr.Button("Can my landlord evict me without notice?", elem_classes="example-btn", size="sm")
+                ex1 = gr.Button("My Boss deducted ₦10k for lateness. Is it legal?", elem_classes="example-btn", size="sm")
+                ex2 = gr.Button("I want to sue my landlord for illegal eviction in Lagos. What's the process?", elem_classes="example-btn", size="sm")
             with gr.Row():
-                ex3 = gr.Button("I bought a defective phone — what are my rights?", elem_classes="example-btn", size="sm")
-                ex4 = gr.Button("I was fired without warning — what can I do?", elem_classes="example-btn", size="sm")
-            with gr.Row():
-                ex5 = gr.Button("Review this contract for risky clauses", elem_classes="example-btn", size="sm")
-                ex6 = gr.Button("How do I file a complaint against my employer?", elem_classes="example-btn", size="sm")
+                ex3 = gr.Button("I bought a phone in Nigeria that broke after 1 week.  The shop won't refund. What are my rights?", elem_classes="example-btn", size="sm")
+                # ex4 = gr.Button("I was fired without warning — what can I do?", elem_classes="example-btn", size="sm")
+            # with gr.Row():
+            #     ex5 = gr.Button("Review this contract for risky clauses", elem_classes="example-btn", size="sm")
+            #     ex6 = gr.Button("How do I file a complaint against my employer?", elem_classes="example-btn", size="sm")
 
         # ── Actions row ──
         clear = gr.ClearButton([msg, chatbot], value="New conversation", elem_classes="action-btn")
@@ -325,12 +325,12 @@ def legal_aid_chat_interface():
         wire_send(submit.click, [msg, chatbot])
         wire_send(msg.submit, [msg, chatbot])
 
-        wire_example(ex1, "My boss deducted my salary for being late")
-        wire_example(ex2, "Can my landlord evict me without notice?")
-        wire_example(ex3, "I bought a defective phone — what are my rights?")
-        wire_example(ex4, "I was fired without warning — what can I do?")
-        wire_example(ex5, "Review this contract for risky clauses")
-        wire_example(ex6, "How do I file a complaint against my employer?")
+        wire_example(ex1, "My Boss deducted ₦10k for lateness. Is it legal?")
+        wire_example(ex2, "I want to sue my landlord for illegal eviction in Lagos. What's the process?")
+        wire_example(ex3, "I bought a phone in Nigeria that broke after 1 week.  The shop won't refund. What are my rights?")
+        # wire_example(ex4, "I was fired without warning — what can I do?")
+        # wire_example(ex5, "Review this contract for risky clauses")
+        # wire_example(ex6, "How do I file a complaint against my employer?")
 
     return interface.launch(
         server_name="127.0.0.1",
